@@ -165,7 +165,7 @@ static bool interpret_cmda(int argc, char *argv[])
     {
         ok = next_cmd->operation(argc, argv);
         if(!ok)
-            printf("There are error when pushing cmd\n");
+            printf("The string format is not correct\n");
     }
     else
     {
