@@ -6,11 +6,19 @@
 #include <errno.h>
 #include <assert.h>
 #include <pthread.h>
-#include <errno.h>
 #include <dirent.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
 #include "task_Q.h"
+
+
+
+# define NEW_CONNECTION 0
+# define READ_SOCK      1
+# define NEITHER        -1
+
 
 
 typedef struct TELE task_ele_t, *taskptr;
@@ -32,6 +40,7 @@ struct NELE
 {
     int clientfd, client_size;
     struct sockaddr_storage *client;
+    pthread_t *thread;
     struct list_head list;
 };
 struct SELE
@@ -52,9 +61,10 @@ static int NUMTHREADS, sockfd, clientfd, num_files, MAX_FILES;
 static task_ele_t taskHead, waitHead;
 pthread_cond_t task_cond, wait_cond;
 pthread_mutex_t task_mutex, wait_mutex, file_mutex;
-pthread_t *threads, send_threads, *sock_threads;
-static struct list_head fileHead, sockHead;
-static char** file_paths;
+pthread_t *threads, send_threads;
+static struct list_head fileHead;
+fd_set master;
+
 
 
 
@@ -64,6 +74,13 @@ void search_string(const char*, struct list_head *);
 char* parse_sstruct(struct list_head *);
 
 
+
+bool init_fd(fd_set *fd)
+{
+    bool ok = true;
+    FD_ZERO(fd);
+    return ok;
+}
 
 
 bool init_sock(struct addrinfo *hints, struct addrinfo **res)
@@ -93,8 +110,17 @@ bool init_sock(struct addrinfo *hints, struct addrinfo **res)
 
 bool init_sockstorage(struct sockaddr_storage **client)
 {
+    bool ok = true;
     *client = (struct sockaddr_storage*) malloc(sizeof(struct sockaddr_storage));
+    if(*client == NULL)
+    {
+        ok = false;
+        printf("Init the sock storage failed\n");
+        return ok;
+    }
+    printf("success on init storage\n");
     memset(*client, 0, sizeof(struct sockaddr_storage));
+    return ok;
 }
 
 bool init_queue()
@@ -133,12 +159,17 @@ bool accept_client(int *clientfd, struct sockaddr_storage **client, int *client_
     char s[50];
     *clientfd = accept(sockfd, (struct sockaddr*) sockptr, (socklen_t*) client_size );
     if(*clientfd == -1)
+    {
+        printf("The acceptance is failed\n");
         ok = false;
+        return ok;
+    }
     // printf("clientfd: %d\n", *clientfd);
     // printf("ip_type %d\n", sockptr->ss_family);
     assert((sockptr->ss_family == AF_INET));
     inet_ntop(sockptr->ss_family, &((struct sockaddr_in*)sockptr)->sin_addr, s, sizeof(s));
     printf("Connect to %s:%u\n", s, ntohs((short)((struct sockaddr_in*)sockptr)->sin_port));
+    return ok;
 }
 
 char* strsave(char *s)
@@ -212,7 +243,7 @@ bool read_msg_and_assign_work(int clientfd)
     {
         close(clientfd);
         printf("Connection closed. \n");
-        ok = false;
+        FD_CLR(clientfd, &master);
         return ok;
     }
     printf("Query %s\n", buf);
@@ -223,7 +254,7 @@ bool read_msg_and_assign_work(int clientfd)
         char* questStr = (char*) malloc(len);
         memset(questStr, '\0', len);
         memcpy(questStr, argv[i], len);
-        task_ele_t *node = new_node(questStr);
+        task_ele_t *node = new_node(questStr, clientfd);
         pthread_mutex_lock(&task_mutex);
         list_add_tail(&node->list, &taskHead.list);
         pthread_mutex_unlock(&task_mutex);
@@ -456,29 +487,42 @@ char* parse_sstruct(struct list_head *head)
 }
 
 
-
-
-/* For multiple client */
-void* sub_server(void* data)
+bool fd_selecting(fd_set *fdset, int *fd_max, int *statusbuf, int *clientfd)
 {
-
-    struct NELE * client_sock = (struct NELE*) data;
     bool ok = true;
-    while(1)
-    {
-        ok = ok && read_msg_and_assign_work(client_sock->clientfd);
 
-        if(!ok)
-        {
-            printf("The clientfd %d is closed!\n", clientfd);
-            ok = true;
-            break;
-        }
+    printf("Waiting for activity!\n");
+    if(select(*fd_max + 1, fdset, NULL, NULL, NULL) == -1)
+    {
+        printf("Select error!\n error code: %d", errno);
+        exit(4);
     }
 
-    pthread_exit(NULL);
+    for(int i=0; i<=*fd_max; i++)
+    {
+        /* Test if teh fd is part of set */
+        if(FD_ISSET(i, fdset))
+        {
+            /* if the fd is this main process */
+            if(i == sockfd)
+            {
+                /* Handle new connections */
+                *statusbuf = NEW_CONNECTION;
+                return ok;
+            }
+            else
+            {
+                /* Handle client request */
+                *statusbuf = READ_SOCK;
+                *clientfd = i;
+                return ok;
+            }
+        }
+    }
+    *clientfd = -1;
+    *statusbuf = NEITHER;
+    return ok;
 }
-
 
 
 #endif
