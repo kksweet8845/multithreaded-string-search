@@ -61,24 +61,37 @@ int main(int argc, char *argv[])
     {
         printf("listen errno : %d\n", errno);
     }
-    init_sockstorage(&client);
-    client_size = sizeof(*client);
     if(!ok)
     {
         printf("errno : %d\n", errno);
     }
     // printf("Numeric: %u\n", ntohl(((struct sockaddr_in*)client)->sin_addr.s_addr));
     /* accept the client */
-    ok = ok && accept_client(&clientfd, &client, &client_size);
     while(1)
     {
-        /* Receive transmitted data */
-        ok = ok && read_msg_and_assign_work(clientfd);
-        /* Send response */
-        if(!ok)
+        init_sockstorage(&client);
+        client_size = sizeof(*client);
+        ok = ok && accept_client(&clientfd, &client, &client_size);
+
+        // struct NELE *sock_node = (struct NELE*) malloc(sizeof(struct NELE));
+        // sock_node->clientfd = clientfd;
+        // sock_node->client = client;
+        // sock_node->client_size = client_size;
+        // pthread_t *th = (pthread_t*) malloc(sizeof(pthread_t));
+        // pthread_create(th, NULL, sub_server, (void*) sock_node);
+
+        while(1)
         {
-            printf("The clientfd %d is not good!\n", clientfd);
-            ok = true;
+            /* Receive transmitted data */
+            ok = ok && read_msg_and_assign_work(clientfd);
+            /* Send response */
+            if(!ok)
+            {
+                printf("The clientfd %d is closed!\n", clientfd);
+                ok = true;
+                break;
+            }
         }
+        free(client);
     }
 }

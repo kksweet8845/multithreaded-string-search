@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <ctype.h>
+#include <sys/stat.h>
 #include "task_Q.h"
 
 
@@ -26,24 +27,36 @@ struct FELE
     struct list_head list;
 };
 
+
+struct NELE
+{
+    int clientfd, client_size;
+    struct sockaddr_storage *client;
+    struct list_head list;
+};
 struct SELE
 {
     char* target;
     char* filename;
     int count;
+    struct NELE *sock;
     struct list_head list;
 };
+
 
 /* Some static variable */
 static char *local_host, *port, *root_dir;
 extern int errno;
 extern char* optarg;
-static int NUMTHREADS, sockfd, clientfd;
+static int NUMTHREADS, sockfd, clientfd, num_files, MAX_FILES;
 static task_ele_t taskHead, waitHead;
 pthread_cond_t task_cond, wait_cond;
 pthread_mutex_t task_mutex, wait_mutex, file_mutex;
-pthread_t *threads, send_threads;
-static struct list_head fileHead;
+pthread_t *threads, send_threads, *sock_threads;
+static struct list_head fileHead, sockHead;
+static char** file_paths;
+
+
 
 void* worker();
 int str_match( const char*, const char*);
@@ -125,7 +138,7 @@ bool accept_client(int *clientfd, struct sockaddr_storage **client, int *client_
     // printf("ip_type %d\n", sockptr->ss_family);
     assert((sockptr->ss_family == AF_INET));
     inet_ntop(sockptr->ss_family, &((struct sockaddr_in*)sockptr)->sin_addr, s, sizeof(s));
-    printf("Connected to %s:%u\n", s, ntohs((short)((struct sockaddr_in*)sockptr)->sin_port));
+    printf("Connect to %s:%u\n", s, ntohs((short)((struct sockaddr_in*)sockptr)->sin_port));
 }
 
 char* strsave(char *s)
@@ -287,46 +300,74 @@ void* worker()
     pthread_exit(NULL);
 }
 
+void printdir(char* dir, char* abs_dir, int depth, struct list_head *head)
+{
+    DIR *dp;
+    struct dirent *entry;
+    struct stat statbuf;
+    if((dp = opendir(dir)) == NULL)
+    {
+        fprintf(stderr,"cannot open directory: %s\n", dir);
+        return;
+    }
+    chdir(dir);
+    while((entry = readdir(dp)) != NULL)
+    {
+        lstat(entry->d_name,&statbuf);
+        if(S_ISDIR(statbuf.st_mode))
+        {
+            /* Found a directory, but ignore . and .. */
+            if(strcmp(".",entry->d_name) == 0 ||
+                    strcmp("..",entry->d_name) == 0)
+                continue;
+            /* Recurse at a new indent level */
+            int bytes = strlen(abs_dir) + strlen(entry->d_name) + 2;
+            char* abs_paths = (char*) malloc(bytes);
+            memset(abs_paths, '\0', bytes);
+            strcat(abs_paths, abs_dir);
+            strcat(abs_paths, "/");
+            strcat(abs_paths, entry->d_name);
+            printdir(entry->d_name, abs_paths, depth+4, head);
+            free(abs_paths);
+        }
+        else
+        {
+            int bytes = strlen(abs_dir) + strlen(entry->d_name) + 2;
+            char* buf = (char*) malloc(bytes);
+            char* filename = (char*) malloc(strlen(entry->d_name) + 1);
+            fsptr node = (fsptr) malloc(sizeof(file_ele_t));
+            FILE *fp;
+            memset(buf, '\0', bytes);
+            strcat(buf, abs_dir);
+            strcat(buf, "/");
+            strcat(buf, entry->d_name);
+            fp = fopen(entry->d_name, "r");
+            if(fp == NULL)
+            {
+                /**
+                 * Number 2 for no such file.
+                 */
+                printf(" error occurred %d\n", errno);
+            }
+            memcpy(filename, entry->d_name, strlen(entry->d_name) + 1);
+            node->filename = filename;
+            node->path = buf;
+            node->fptr = fp;
+            INIT_LIST_HEAD(&node->list);
+            list_add_tail(&node->list, head);
+        }
+    }
+    chdir("..");
+    closedir(dp);
+}
+
+
+
 bool open_files()
 {
-
     bool ok = true;
-    char* file_1 = "/test.txt";
-    char* file_2 = "/testdir2/test2.txt";
-    char* file_path_1 = (char*) malloc(20);
-    memset(file_path_1, '\0', 20);
-    char* file_path_2 = (char*) malloc(30);
-    memset(file_path_2, '\0', 30);
-    strcat(file_path_1, root_dir);
-    strcat(file_path_1, file_1);
-    strcat(file_path_2, root_dir);
-    strcat(file_path_2, file_2);
-    // printf("%s\n", file_path_1);
-    // printf("%s\n", file_path_2);
-    FILE* fptemp;
-    fptemp = fopen(file_path_1, "r");
-    if(fptemp == NULL)
-    {
-        printf("File errno %d\n", errno);
-    }
-    fsptr node = (file_ele_t*) malloc(sizeof(file_ele_t));
-    INIT_LIST_HEAD(&node->list);
-    node->fptr = fptemp;
-    node->filename = "./test.txt";
-    node->path = file_path_1;
-    list_add_tail(&node->list, &fileHead);
-    fptemp = fopen(file_path_2, "r");
-    node = (file_ele_t*) malloc(sizeof(file_ele_t));
-    if(fptemp == NULL)
-    {
-        printf("File errno %d\n", errno);
-    }
-    node->filename = "./testdir2/test2.txt";
-    node->path = file_path_2;
-    INIT_LIST_HEAD(&node->list);
-    node->fptr = fptemp;
-    list_add_tail(&node->list, &fileHead);
-    file_ele_t *item;
+    fsptr item;
+    printdir(root_dir, root_dir, 0, &fileHead);
     return ok;
 }
 
@@ -414,6 +455,29 @@ char* parse_sstruct(struct list_head *head)
     return output;
 }
 
+
+
+
+/* For multiple client */
+void* sub_server(void* data)
+{
+
+    struct NELE * client_sock = (struct NELE*) data;
+    bool ok = true;
+    while(1)
+    {
+        ok = ok && read_msg_and_assign_work(client_sock->clientfd);
+
+        if(!ok)
+        {
+            printf("The clientfd %d is closed!\n", clientfd);
+            ok = true;
+            break;
+        }
+    }
+
+    pthread_exit(NULL);
+}
 
 
 

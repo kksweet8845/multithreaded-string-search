@@ -27,7 +27,7 @@ static int sockfd;
 
 
 
-bool check_dq(int *argcp, char* argv[]);
+char* check_dq(int *argcp, char* argv[]);
 
 bool do_query_cmd(int argc, char* argv[]);
 void* recv_msg();
@@ -101,7 +101,7 @@ bool init_sock(struct addrinfo *hints, struct addrinfo **res)
 }
 
 
-bool check_dq(int *argcp, char* argv[])
+char* check_dq(int *argcp, char* argv[])
 {
     bool ok = true;
     if(*argcp == 0)
@@ -150,7 +150,7 @@ bool check_dq(int *argcp, char* argv[])
         src += strlen(rst[i]) + 1;
     }
     *argcp = segment;
-    return ok;
+    return merged_str;
 }
 
 
@@ -159,11 +159,13 @@ bool do_query_cmd(int argc, char* argv[])
 {
 
     /* Check the double quote */
-    bool ok = check_dq(&argc, argv);
+    bool ok = true;
+    char* merged_str = check_dq(&argc, argv);
+    if(merged_str == NULL)
+        ok = false;
     if(!ok)
         return ok;
-    char ** aargv = argv+1;
-    char* merged_str = gen_str_space(argc-1, aargv);
+    printf("%s\n", merged_str);
     void * buf = malloc(128);
     int bytes = strlen(merged_str)+1;
     memcpy(buf, (void*) merged_str, bytes);
