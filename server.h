@@ -320,13 +320,12 @@ void* worker()
         search_string(t->string, &search_head);
         char* result = parse_sstruct(&search_head);
         free(t->string);
-        t->string = result;
 
-        int bytes = strlen(t->string)+1;
+        int bytes = strlen(result)+1;
         char* buf = (char*) malloc(bytes);
         memset(buf, '\0', bytes);
-        memcpy(buf, t->string, bytes);
-        write(clientfd, buf, bytes);
+        memcpy(buf, result, bytes);
+        write(clientfd, (void*) buf, bytes);
     }
     pthread_exit(NULL);
 }
@@ -459,16 +458,18 @@ char* parse_sstruct(struct list_head *head)
 {
 
     search_ele_t *item, *safe;
-    char buf[50];
-    memset(buf, '\0', 50);
-    char* output = (char*) malloc(100);
-    memset(output, '\0', 100);
     item = list_first_entry(head, search_ele_t, list);
+    int bytes = strlen(item->target) + 1;
+    char* buf = (char*) malloc(bytes + 100);
+    memset(buf, '\0', bytes);
+    char* output = (char*) malloc(bytes + 1000);
+    memset(output, '\0', bytes +1000);
     sprintf(buf, "String: \"%s\"\n", item->target);
     strcat(output, buf);
-    int filecount = 0;
+    int filecount = 0, nfile = 0;
     list_for_each_entry_safe(item, safe, head, list)
     {
+        nfile++;
         if(item->count == 0)
         {
             free(item);
@@ -479,10 +480,11 @@ char* parse_sstruct(struct list_head *head)
         strcat(output, buf);
         free(item);
     }
-    if(filecount >= 2)
+    if(filecount == nfile)
     {
         strcat(output, "Not found\n");
     }
+    free(buf);
     return output;
 }
 
@@ -491,7 +493,6 @@ bool fd_selecting(fd_set *fdset, int *fd_max, int *statusbuf, int *clientfd)
 {
     bool ok = true;
 
-    printf("Waiting for activity!\n");
     if(select(*fd_max + 1, fdset, NULL, NULL, NULL) == -1)
     {
         printf("Select error!\n error code: %d", errno);

@@ -12,6 +12,8 @@
 #include "queue.h"
 #include <errno.h>
 
+#define MAX_BUF_SIZE 10000
+
 
 static char* local_host;
 static char* port;
@@ -165,9 +167,8 @@ bool do_query_cmd(int argc, char* argv[])
         ok = false;
     if(!ok)
         return ok;
-    printf("%s\n", merged_str);
-    void * buf = malloc(128);
-    int bytes = strlen(merged_str)+1;
+    int bytes = strlen(merged_str) + 1;
+    void * buf = malloc(bytes);
     memcpy(buf, (void*) merged_str, bytes);
     write(sockfd, buf, bytes);
     return ok;
@@ -177,12 +178,15 @@ bool do_query_cmd(int argc, char* argv[])
 void* recv_msg()
 {
     /* Keep read the message */
+    bool waiting = true;
     while(sockfd)
     {
-        char* buf = (char*) malloc(1000);
-        int bytes = read(sockfd, (void*)buf, 1000);
+        char* buf = (char*) malloc(MAX_BUF_SIZE);
+        int bytes = read(sockfd, (void*)buf, MAX_BUF_SIZE);
         if(bytes <= 0)
         {
+            waiting = true;
+            continue;
         }
         printf("%s \n", buf);
     }

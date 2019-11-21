@@ -10,9 +10,9 @@
 /* Some global calues */
 static cmd_ptr cmd_list = NULL;
 
-static bool prompt_flag = true;
+extern bool prompt_flag = true;
 static bool quit_flag = false;
-static char *prompt = "cmd>";
+static char *prompt = "";
 
 int fd_max = 0;
 
@@ -251,7 +251,6 @@ bool run_console()
         }
         cmdline = readline();
         interpret_cmd(cmdline);
-        prompt_flag = true;
     }
     return true;
 }

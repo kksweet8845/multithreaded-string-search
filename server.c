@@ -105,7 +105,6 @@ int main(int argc, char *argv[])
 
         if(!ok)
             continue;
-        printf("status : %d\n", status);
         switch(status)
         {
         case NEW_CONNECTION:

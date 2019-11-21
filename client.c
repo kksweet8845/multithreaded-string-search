@@ -48,7 +48,13 @@ int main(int argc, char *argv[])
     ok = ok && init_sock(&hints, &servinfo);
     ok = ok && init_app();
     ok = ok && init_thread();
-    ok = ok && !(connect(sockfd, (struct sockaddr*) servinfo->ai_addr, (socklen_t) servinfo->ai_addrlen));
+    while(1)
+    {
+        ok = !connect(sockfd, (struct sockaddr*) servinfo->ai_addr, (socklen_t) servinfo->ai_addrlen);
+        if(ok)
+            break;
+    }
+    // ok = ok && !(connect(sockfd, (struct sockaddr*) servinfo->ai_addr, (socklen_t) servinfo->ai_addrlen));
     ok = ok && run_console();
     ok = ok && finish_cmd();
     close(sockfd);
